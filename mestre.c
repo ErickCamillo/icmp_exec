@@ -10,15 +10,11 @@
 #include <netinet/ip_icmp.h>
 #include <netdb.h>
 
-/*
-	ICMP EXEC - MESTRE
-	By: Zer0
-*/
+// ICMP EXEC - MESTRE
 
 // Limite de tempo que o socket deve esperar por respostas
 #define TEMPO_LIMITE 5
 
-// Estruturas
 struct pacote{
 	struct icmphdr hdr;
 	char msg[200];
@@ -29,7 +25,6 @@ struct sockaddr_in dst_addr , src_addr;
 struct timeval timeout;
 struct hostent *host;
 
-// Funções
 int icmp_cc(char *ip);
 unsigned short checksum(void *b, int len);
 
@@ -85,7 +80,7 @@ int icmp_cc(char *ip)
 	timeout.tv_sec = TEMPO_LIMITE;
 	timeout.tv_usec = 0;
 
-	// Cria socket 
+	// Cria o socket 
 	int sock = socket(AF_INET , SOCK_RAW , IPPROTO_ICMP);
 	if(sock == -1) return -1;
 
@@ -93,16 +88,15 @@ int icmp_cc(char *ip)
 	dst_addr.sin_family = AF_INET;
 	dst_addr.sin_addr.s_addr = inet_addr(ip);
 
-	// Opções para o socket
+	// Setando ttl e tempo de espera de cada resposta
 	setsockopt(sock , SOL_IP , IP_TTL , &ttl_val , sizeof(ttl_val));
 	setsockopt(sock , SOL_SOCKET , SO_RCVTIMEO , (const char*)&timeout , sizeof(timeout));
 
-	printf("> ICMP MESTRE - BY: Zer0\n");
-	printf("> Iniciado...\n");
+	printf("> ICMP MESTRE - Mestre\n");
+	printf("> Iniciando...\n");
 
 	while(1)
 	{
-		// Zerando a estrutura packet
 		bzero(&packet , sizeof (packet));
 
 		// Payload
